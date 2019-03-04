@@ -21,7 +21,7 @@ class QAgent():
         with tf.variable_scope("prediction_network"):
             self.prediction_input_placeholder = tf.placeholder("float", [None] + self.input_shape)
             # slim convolution2d()
-            conv1 = slim.conv2d(self.prediction_input_placeholder, 16, kernel_size=[3, 3])
+            conv1 = slim.conv2d(self.prediction_input_placeholder, num_outputs=16, kernel_size=[3, 3])
             conv2 = slim.conv2d(conv1, num_outputs=32, kernel_size=[3, 3])
             conv3 = slim.conv2d(conv2, num_outputs=64, kernel_size=[3, 3])
             flatten = slim.flatten(conv3)
@@ -76,10 +76,64 @@ class QAgent():
         _, loss = self.sess.run([self.train_op, self.loss], feed_dict=feed_dict)
 
         return loss
+    
+    def update_target_network(self):
+        pred_net_variables = tf.global_variables(scope="prediction_network")
+        target_net_variables = tf.global_variables(scope="target_network")
+
+        if len(pred_net_variables) != len(target_net_variables):
+            assert "Variable size unmatch"
+
+        for p, t in zip(pred_net_variables, target_net_variables):
+            if p.shape != t.shape:
+                assert "Variable shape unmatch"
+            #old_t = self.sess.run(t)
+            #curr_p = self.sess.run(p)
+            self.sess.run(t.assign(p))
+            #curr_t = self.sess.run(t)
+
+class EpisodeMemory():
+    def __init__(self, no_discount_reward_calculation=False):
+        self.states = []
+        self.actions = []
+        self.rewards = []
+        self.states_next = []
+        self.tarminals = []
+        self.discounted_rewards = []
+
+        self.no_discount_reward_calculation = no_discount_reward_calculation
+    
+    def reset(self):
+        self.states = []
+        self.actions = []
+        self.rewards = []
+        self.states_next = []
+        self.tarminals = []
+        self.discounted_rewards = []
+
+    def add_episode(self, episode):
+        self.states += episode.states
+        self.actions += episode.actions
+        self.rewards += episode.rewards
+        self.states_next += episode.states_next
+        self.tarminals += episode.tarminals
+        self.discounted_rewards += episode.discounted_rewards
+
+    def add_one_step(self, state, action, reward, state_next, tarminal):
+        self.states.append(state)
+        self.actions.append(action)
+        self.rewards.append(reward)
+        self.states_next.append(state_next)
+        self.tarminals.append(tarminal)
+
+    def calculate_discounted_rewards(self, discount_rate=0.99):
+        if self.no_discount_reward_calculation:
+            assert "Wrong operation"
+
+        self.discounted_rewards = [0 for _ in range(len(self.rewards))]
+        self.discounted_rewards[-1] = self.rewards[-1]
+
+        for i in range(len(self.rewards) - 2, -1, -1):
+            self.discounted_rewards[i] = self.rewards[i] + self.discounted_rewards[i + 1] * discount_rate
 
 
-
-
-
-qa = QAgent(tf.Session(), [2,3,4], 3)
-print("asdf")
