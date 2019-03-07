@@ -1,12 +1,13 @@
 import tensorflow as tf
 import gym
 import numpy as np
+from PIL import Image
 
 slim = tf.contrib.slim
 
 class QAgent():
     def __init__(self, sess, input_shape, num_actions, gamma=0.99):
-        # input_shape should shape [num state history, width, height]
+        # input_shape should shape [num state history, height, width]
         # gamma is reward discount ratio
         self.sess = sess
         self.input_shape = input_shape
@@ -93,7 +94,7 @@ class QAgent():
             #curr_t = self.sess.run(t)
 
 class EpisodeMemory():
-    def __init__(self, no_discount_reward_calculation=False):
+    def __init__(self, global_memory, num_hold_episode=30000):
         self.states = []
         self.actions = []
         self.rewards = []
@@ -101,7 +102,8 @@ class EpisodeMemory():
         self.tarminals = []
         self.discounted_rewards = []
 
-        self.no_discount_reward_calculation = no_discount_reward_calculation
+        self.global_memory = global_memory
+        self.num_hold_episode = num_hold_episode
     
     def reset(self):
         self.states = []
@@ -111,13 +113,26 @@ class EpisodeMemory():
         self.tarminals = []
         self.discounted_rewards = []
 
+    def remove_old_episode(self):
+        if len(self.states) > self.num_hold_episode:
+            self.states = self.states[-self.num_hold_episode:]
+            self.actions = self.actions[-self.num_hold_episode:]
+            self.rewards = self.rewards[-self.num_hold_episode:]
+            self.states_next = self.states_next[-self.num_hold_episode:]
+            self.tarminals = self.tarminals[-self.num_hold_episode:]
+            self.discounted_rewards = self.discounted_rewards[-self.num_hold_episode:]
+
     def add_episode(self, episode):
+        if not self.global_memory:
+            assert "Wrong operation"
         self.states += episode.states
         self.actions += episode.actions
         self.rewards += episode.rewards
         self.states_next += episode.states_next
         self.tarminals += episode.tarminals
         self.discounted_rewards += episode.discounted_rewards
+
+        self.remove_old_episode()
 
     def add_one_step(self, state, action, reward, state_next, tarminal):
         self.states.append(state)
@@ -127,7 +142,7 @@ class EpisodeMemory():
         self.tarminals.append(tarminal)
 
     def calculate_discounted_rewards(self, discount_rate=0.99):
-        if self.no_discount_reward_calculation:
+        if self.global_memory:
             assert "Wrong operation"
 
         self.discounted_rewards = [0 for _ in range(len(self.rewards))]
@@ -136,4 +151,38 @@ class EpisodeMemory():
         for i in range(len(self.rewards) - 2, -1, -1):
             self.discounted_rewards[i] = self.rewards[i] + self.discounted_rewards[i + 1] * discount_rate
 
+class StateHoler():
+    def __init__(self, num_states, initial_state):
+        self.num_states = num_states
+        # Convert to gray scale
+        state = np.array(Image.fromarray(initial_state).convert('L'))
+        self.states = np.array([state for _ in range(self.num_states)])
+    
+    def add_state(self, new_state):
+        state = np.array(Image.fromarray(new_state).convert('L'))
+        self.states = np.concatenate((self.states, [state]))
+        self.states = self.states[-self.num_states:]
+        return self.states
+
+def main():
+    num_states_to_hold = 4
+
+    env = gym.make("Breakout-v0")
+    num_states = env.observation_space.shape # [height, width, channel]
+    num_states = [num_states[0]] + [num_states[1]]
+    num_actions = env.action_space.n
+    
+
+    with tf.Session() as sess:
+        agent = QAgent(sess, [num_states_to_hold] + num_states, num_actions)
+        state = env.reset()
+        state_holder = StateHoler(num_states_to_hold, state)
+        state_holder.add_state(state)
+        print("asdf")
+
+        
+
+
+if __name__ == "__main__":
+    main()
 
