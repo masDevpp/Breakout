@@ -6,48 +6,93 @@ from PIL import Image
 slim = tf.contrib.slim
 
 class QAgent():
-    def __init__(self, sess, input_shape, num_actions, gamma=0.99):
-        # input_shape should shape [num state history, height, width]
+    def __init__(self, sess, input_shape, num_actions, epsilon_initial, epsilon_end, gamma):
+        # input_shape should shape [height, width, num state history]
         # gamma is reward discount ratio
         self.sess = sess
         self.input_shape = input_shape
         self.num_actions = num_actions
+        self.epsilon_initial = epsilon_initial
+        self.epsilon_end = epsilon_end
         self.gamma = gamma
 
         self.build_prediction_network()
         self.build_target_network()
         self.build_training_operator()
+        self.summary = tf.summary.merge_all()
     
     def build_prediction_network(self):
-        with tf.variable_scope("prediction_network"):
-            self.prediction_input_placeholder = tf.placeholder("float", [None] + self.input_shape)
-            # slim convolution2d()
-            conv1 = slim.conv2d(self.prediction_input_placeholder, num_outputs=16, kernel_size=[3, 3])
-            conv2 = slim.conv2d(conv1, num_outputs=32, kernel_size=[3, 3])
-            conv3 = slim.conv2d(conv2, num_outputs=64, kernel_size=[3, 3])
-            flatten = slim.flatten(conv3)
-            fc1 = slim.fully_connected(flatten, int(flatten.get_shape().as_list()[1] / 2))
-            fc2 = slim.fully_connected(fc1, int(fc1.get_shape().as_list()[1] / 2))
-            self.output = slim.fully_connected(fc2, self.num_actions, activation_fn=None)
+        with tf.device('/cpu:0'):
+            with tf.variable_scope("prediction_network"):
+                self.prediction_input_placeholder = tf.placeholder("float", [None] + self.input_shape)
+                """
+                #max_pool0 = slim.max_pool2d(self.prediction_input_placeholder, [2, 2])
+                conv1 = slim.conv2d(self.prediction_input_placeholder, num_outputs=8, kernel_size=[3, 3])
+                max_pool1 = slim.max_pool2d(conv1, [3, 3], [3, 3])
+                conv2 = slim.conv2d(max_pool1, num_outputs=16, kernel_size=[3, 3])
+                max_pool2 = slim.max_pool2d(conv2, [3, 3], [3, 3])
+                conv3 = slim.conv2d(max_pool2, num_outputs=32, kernel_size=[3, 3])
+                max_pool3 = slim.max_pool2d(conv3, [3, 3], [3, 3])
+                flatten = slim.flatten(max_pool3)
+                fc1 = slim.fully_connected(flatten, int(flatten.get_shape().as_list()[1] / 4))
+                fc2 = slim.fully_connected(fc1, int(fc1.get_shape().as_list()[1] / 4))
+                self.output = slim.fully_connected(fc2, self.num_actions, activation_fn=None, activation_fn=None)
+                """
+                conv_0 = slim.conv2d(self.prediction_input_placeholder, 16, 8, 4, scope="conv_0")
+                conv_1 = slim.conv2d(conv_0, 32, 4, 2, scope="conv_1")
+                #conv_2 = slim.conv2d(conv_1, 64, 3, 1, scope="conv_2")
+                flatten = slim.flatten(conv_1)
+                fc_0 = slim.fully_connected(flatten, 256, scope="fc_0")
+                self.output = slim.fully_connected(fc_0, self.num_actions, activation_fn=None, scope="q_values")
         
     def build_target_network(self):
-        with tf.variable_scope("target_network"):
-            self.target_net_input_placeholder = tf.placeholder("float", [None] + self.input_shape)
-            conv1 = slim.conv2d(self.target_net_input_placeholder, num_outputs=16, kernel_size=[3, 3])
-            conv2 = slim.conv2d(conv1, num_outputs=32, kernel_size=[3, 3])
-            conv3 = slim.conv2d(conv2, num_outputs=64, kernel_size=[3, 3])
-            flatten = slim.flatten(conv3)
-            fc1 = slim.fully_connected(flatten, int(flatten.get_shape().as_list()[1] / 2))
-            fc2 = slim.fully_connected(fc1, int(fc1.get_shape().as_list()[1] / 2))
-            self.output_target = slim.fully_connected(fc2, self.num_actions, activation_fn=None)
+        with tf.device('/cpu:0'):
+            with tf.variable_scope("target_network"):
+                self.target_net_input_placeholder = tf.placeholder("float", [None] + self.input_shape)
+                """
+                #max_pool0 = slim.max_pool2d(self.target_net_input_placeholder, [2, 2])
+                conv1 = slim.conv2d(self.target_net_input_placeholder, num_outputs=8, kernel_size=[3, 3])
+                max_pool1 = slim.max_pool2d(conv1, [3, 3], [3, 3])
+                conv2 = slim.conv2d(max_pool1, num_outputs=16, kernel_size=[3, 3])
+                max_pool2 = slim.max_pool2d(conv2, [3, 3], [3, 3])
+                conv3 = slim.conv2d(max_pool2, num_outputs=32, kernel_size=[3, 3])
+                max_pool3 = slim.max_pool2d(conv3, [3, 3], [3, 3])
+                flatten = slim.flatten(max_pool3)
+                fc1 = slim.fully_connected(flatten, int(flatten.get_shape().as_list()[1] / 4))
+                fc2 = slim.fully_connected(fc1, int(fc1.get_shape().as_list()[1] / 4))
+                self.output_target = slim.fully_connected(fc2, self.num_actions, activation_fn=None, activation_fn=None)
+                """
+                conv_0 = slim.conv2d(self.target_net_input_placeholder, 16, 8, 4, scope="conv_0")
+                conv_1 = slim.conv2d(conv_0, 32, 4, 2, scope="conv_1")
+                #conv_2 = slim.conv2d(conv_1, 64, 3, 1, scope="conv_2")
+                flatten = slim.flatten(conv_1)
+                fc_0 = slim.fully_connected(flatten, 256, scope="fc_0")
+                self.output_target = slim.fully_connected(fc_0, self.num_actions, activation_fn=None, scope="q_values")
 
     def build_training_operator(self):
-        with tf.variable_scope("training_operator"):
-            self.q_value_placeholder = tf.placeholder("float", [None, self.num_actions])
-            self.learning_rate_placeholder = tf.placeholder("float")
-            self.loss = tf.reduce_mean(tf.square(self.output - self.q_value_placeholder))
-            optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_placeholder)
-            self.train_op = optimizer.minimize(self.loss)
+        with tf.device('/cpu:0'):
+            with tf.variable_scope("training_operator"):
+                self.target_q_placeholder = tf.placeholder("float", [None])
+                self.reward_placeholder = tf.placeholder("float", [None])
+                self.action_placeholder = tf.placeholder("int32", [None])
+                self.learning_rate_placeholder = tf.placeholder("float")
+
+                output_flat = tf.reshape(self.output, [-1])
+
+                index = tf.range(tf.shape(self.output)[0]) * tf.shape(self.output)[1]
+                index = index + self.action_placeholder
+
+                selected_output = tf.gather(output_flat, index)
+
+                target_q = self.reward_placeholder + self.gamma * self.target_q_placeholder
+                #target_q = self.reward_placeholder # Try to train Q to output discounted reward
+
+                self.loss = tf.reduce_mean(tf.square(selected_output - target_q))
+
+                tf.summary.scalar("loss", self.loss)
+
+                optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_placeholder)
+                self.train_op = optimizer.minimize(self.loss)
 
     def predict_action(self, state):
         # Predict Q value for single state
@@ -55,6 +100,19 @@ class QAgent():
         # Return index of max Q
         return np.argmax(q)
     
+    def predict_action_with_epsilon_greedy(self, state, epsilon_ratio):
+        # epsilon_ratio indicates progress of epsilon decay, start from 0.0 to 1.0
+        if epsilon_ratio > 1.0: epsilon_ratio = 1.0
+        elif epsilon_ratio < 0.0: epsilon_ratio = 0.0
+        #epsilon = self.epsilon_end + (self.epsilon_initial - self.epsilon_end) * ((1.0 - epsilon_ratio)**2)
+        epsilon = self.epsilon_end + (self.epsilon_initial - self.epsilon_end) * (1.0 - epsilon_ratio)
+
+        if np.random.random() > epsilon:
+            action = self.predict_action(state)
+            return action
+        else:
+            return np.random.randint(self.num_actions)
+
     def train(self, state, action, reward, state_next, tarminal, learning_rate=0.001):
         # All argument should shape like [batch, ...]
 
@@ -62,21 +120,22 @@ class QAgent():
         # Make numpy target Q array to avoid train target network
         target_q = self.sess.run(self.output_target, feed_dict={self.target_net_input_placeholder:state_next})
         target_q = np.max(target_q, axis=1)
-        target_q = target_q * self.gamma + reward
 
         # Q is zero if terminal
-        tarminal = tarminal.astype("int")
-        target_q = target_q * tarminal
+        tarminal = np.array(tarminal).astype("int")
+        target_q = target_q * (1 - tarminal)
 
         feed_dict = {
             self.prediction_input_placeholder: state,
-            self.q_value_placeholder: target_q,
-            self.learning_rate_placeholder: learning_rate
+            self.target_q_placeholder: target_q,
+            self.reward_placeholder: reward,
+            self.learning_rate_placeholder: learning_rate,
+            self.action_placeholder: action
         }
 
-        _, loss = self.sess.run([self.train_op, self.loss], feed_dict=feed_dict)
+        _, loss, summary = self.sess.run([self.train_op, self.loss, self.summary], feed_dict=feed_dict)
 
-        return loss
+        return loss, summary
     
     def update_target_network(self):
         pred_net_variables = tf.global_variables(scope="prediction_network")
