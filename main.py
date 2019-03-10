@@ -141,7 +141,7 @@ class EpisodeMemory():
         self.states_next.append(state_next)
         self.tarminals.append(tarminal)
 
-    def calculate_discounted_rewards(self, discount_rate=0.99):
+    def calculate_discounted_rewards(self, discount_rate):
         if self.global_memory:
             assert "Wrong operation"
 
@@ -150,6 +150,39 @@ class EpisodeMemory():
 
         for i in range(len(self.rewards) - 2, -1, -1):
             self.discounted_rewards[i] = self.rewards[i] + self.discounted_rewards[i + 1] * discount_rate
+
+    def has_enough_memory(self):
+        return len(self.states) >= self.num_hold_episode
+    
+    def get_batch(self, batch_size):
+        states_batch = []
+        actions_batch = []
+        rewards_batch = []
+        discounted_rewards_batch = []
+        states_next_batch = []
+        tarminals_batch = []
+
+        index = np.arange(len(self.states))
+        np.random.shuffle(index)
+
+        skip_ratio = 0.0#0.9
+        #index = np.random.randint(0, len(self.states), batch_size)
+
+        for i in index:
+            reward = self.rewards[i]
+            rand = np.random.random()
+            if reward == 0.0 and (rand < skip_ratio): continue
+            
+            states_batch.append(self.states[i])
+            actions_batch.append(self.actions[i])
+            rewards_batch.append(self.rewards[i])
+            discounted_rewards_batch.append(self.discounted_rewards[i])
+            states_next_batch.append(self.states_next[i])
+            tarminals_batch.append(self.tarminals[i])
+
+            if len(states_batch) == batch_size: break
+        
+        return states_batch, actions_batch, rewards_batch, discounted_rewards_batch, states_next_batch, tarminals_batch
 
 class StateHoler():
     def __init__(self, num_states, initial_state, do_preprocess):
