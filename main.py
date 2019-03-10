@@ -1,8 +1,11 @@
+import os
 import tensorflow as tf
 import gym
 import numpy as np
 from PIL import Image
+import time
 
+LOG_DIR = os.path.join(os.getcwd(), "log")
 slim = tf.contrib.slim
 
 class QAgent():
@@ -273,23 +276,96 @@ class StateHoler():
 
 def main():
     num_states_to_hold = 4
+    epsilon_initial = 1.0
+    epsilon_end = 0.1
+    epsilon_decay_end_episode = 1000
+    training_frequency = 1#10
+    target_network_update_frequency = 100
+    batch_size = 32
+    gamma = 0.95
+
+    should_render = True
 
     env = gym.make("Breakout-v0")
-    num_states = env.observation_space.shape # [height, width, channel]
-    num_states = [num_states[0]] + [num_states[1]]
     num_actions = env.action_space.n
-    
 
-    with tf.Session() as sess:
-        agent = QAgent(sess, [num_states_to_hold] + num_states, num_actions)
-        state = env.reset()
-        state_holder = StateHoler(num_states_to_hold, state)
-        state_holder.add_state(state)
-        print("asdf")
+    # Initialize StateHolder once to check state shape
+    state = env.reset()
+    state_holder = StateHoler(num_states_to_hold, state, True)
+    num_states = list(state_holder.get_state().shape)
 
-        
+    with tf.Session() as sess:#tf.Session(config=tf.ConfigProto(log_device_placement=True))
+        agent = QAgent(sess, num_states, num_actions, epsilon_initial, epsilon_end, gamma)
+
+        episode_count_variable = tf.Variable(0, trainable=False, name="episode_count")
+        summary_writer = tf.summary.FileWriter(LOG_DIR, sess.graph)
+
+        saver = tf.train.Saver()
+        ckpt = tf.train.get_checkpoint_state(LOG_DIR)
+        if ckpt and ckpt.model_checkpoint_path:
+            print("Load checkpoint " + ckpt.model_checkpoint_path)
+            saver.restore(sess, ckpt.model_checkpoint_path)
+        else:
+            print("Initialize variables")
+            sess.run(tf.global_variables_initializer())
+            agent.update_target_network()
+
+        episode_count = sess.run(episode_count_variable)
+        global_memory = EpisodeMemory(True, 20000)
+
+        while True:
+            state = env.reset()
+            state_holder = StateHoler(num_states_to_hold, state, True)
+            local_memory = EpisodeMemory(False)
+            episode_reward = 0
+
+            start_time = time.time()
+
+            while True:
+                if should_render: env.render()
+
+                action = agent.predict_action_with_epsilon_greedy(state_holder.get_state(), episode_count / epsilon_decay_end_episode)                
+                state_next, reward, done, info = env.step(action)
+
+                #if done:
+                #    reward = -1
+
+                #if info['ale.lives'] == 4: done = True
+                
+                state_initial = state_holder.get_state()
+                state_holder.add_state(state_next)
+                
+                local_memory.add_one_step(state_initial, action, reward, state_holder.get_state(), done)
+                episode_reward += reward
+
+                if done:
+                    local_memory.calculate_discounted_rewards(gamma)
+                    break
+            
+            if episode_reward == 0 and np.random.random() < 0.5: continue
+            
+            global_memory.add_episode(local_memory)
+            episode_count += 1
+            
+            current_time = time.time()
+            print("Ep " + str(episode_count) + ", EpReward " + str(episode_reward) + ", Elapse " + format(current_time - start_time, ".2f"))
+            start_time = current_time
+
+            if global_memory.has_enough_memory():
+                if episode_count % training_frequency == 0:
+                    for i in range(10):
+                        s, a, r, dr, s_next, t = global_memory.get_batch(batch_size)
+                        loss, summary = agent.train(s, a, r, s_next, t, learning_rate=0.01)
+                        print("Loss " + str(loss))
+
+                    sess.run(episode_count_variable.assign(episode_count))
+                    saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"), global_step = episode_count)
+                    summary_writer.add_summary(summary, episode_count)
+
+                if episode_count % target_network_update_frequency == 0:
+                    print("Update target network")
+                    agent.update_target_network()
 
 
 if __name__ == "__main__":
     main()
-
