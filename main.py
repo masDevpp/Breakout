@@ -152,17 +152,32 @@ class EpisodeMemory():
             self.discounted_rewards[i] = self.rewards[i] + self.discounted_rewards[i + 1] * discount_rate
 
 class StateHoler():
-    def __init__(self, num_states, initial_state):
+    def __init__(self, num_states, initial_state, do_preprocess):
         self.num_states = num_states
-        # Convert to gray scale
-        state = np.array(Image.fromarray(initial_state).convert('L'))
-        self.states = np.array([state for _ in range(self.num_states)])
+        self.do_preprocess = do_preprocess
+        if self.do_preprocess:
+            initial_state = self.preprocess_state(initial_state)
+        
+        self.states = np.array([initial_state for _ in range(self.num_states)])
     
+    def preprocess_state(self, state):
+        # Resize and convert to gray scale
+        new_state = np.array(Image.fromarray(state).resize((84, 110), Image.ANTIALIAS).convert("L"))
+        # Crop
+        new_state = new_state[14:-4,:]
+
+        return new_state
+
     def add_state(self, new_state):
-        state = np.array(Image.fromarray(new_state).convert('L'))
-        self.states = np.concatenate((self.states, [state]))
+        if self.do_preprocess:
+            new_state = self.preprocess_state(new_state)
+
+        self.states = np.concatenate((self.states, [new_state]))
         self.states = self.states[-self.num_states:]
-        return self.states
+    
+    def get_state(self):
+        # Return shape [height, width, channel]
+        return self.states.transpose([1,2,0])
 
 def main():
     num_states_to_hold = 4
