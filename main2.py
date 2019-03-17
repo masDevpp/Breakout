@@ -40,11 +40,11 @@ class QAgent():
         with tf.variable_scope("target_network"):
             self.target_net_input_placeholder = tf.placeholder("float", [None] + self.input_shape)
 
-            conv_0 = slim.conv2d(self.target_net_input_placeholder, 16, 8, 4, scope="conv_0")
-            conv_1 = slim.conv2d(conv_0, 32, 4, 2, scope="conv_1")
+            conv_0 = slim.conv2d(self.target_net_input_placeholder, 16, 8, 4, scope="conv_0", trainable=False)
+            conv_1 = slim.conv2d(conv_0, 32, 4, 2, scope="conv_1", trainable=False)
             flatten = slim.flatten(conv_1)
-            fc_0 = slim.fully_connected(flatten, 256, scope="fc_0")
-            self.output_target = slim.fully_connected(fc_0, self.num_actions, activation_fn=None, scope="q_values")
+            fc_0 = slim.fully_connected(flatten, 256, scope="fc_0", trainable=False)
+            self.output_target = slim.fully_connected(fc_0, self.num_actions, activation_fn=None, scope="q_values", trainable=False)
 
     def build_training_operator(self):
         #with tf.device('/cpu:0'):
@@ -63,7 +63,8 @@ class QAgent():
 
             target_q = self.reward_placeholder + self.gamma * self.target_q_placeholder
 
-            self.loss = tf.reduce_mean(tf.square(selected_output - target_q))
+            #self.loss = tf.reduce_mean(tf.square(selected_output - target_q))
+            self.loss = tf.losses.mean_squared_error(target_q, selected_output)
 
             tf.summary.scalar("loss", self.loss)
 
@@ -126,52 +127,49 @@ class QAgent():
             self.sess.run(t.assign(p))
 
 class EpisodeMemory():
-    def __init__(self, global_memory, num_hold_episode=30000):
+    def __init__(self, global_memory, min_size, max_size, do_preprocess, state_seq_length):
         self.states = []
         self.actions = []
         self.rewards = []
-        self.states_next = []
-        self.tarminals = []
+        self.terminals = []
         self.discounted_rewards = []
 
         self.global_memory = global_memory
-        self.num_hold_episode = num_hold_episode
+        self.min_size = min_size
+        self.max_size = max_size
+        self.do_preprocess = do_preprocess
+        self.state_seq_length = state_seq_length
     
     def reset(self):
         self.states = []
         self.actions = []
         self.rewards = []
-        self.states_next = []
-        self.tarminals = []
+        self.terminals = []
         self.discounted_rewards = []
 
+    def preprocess_state(self, state):
+        # Resize and convert to gray scale
+        new_state = np.array(Image.fromarray(state).resize((84, 110), Image.ANTIALIAS).convert("L"))
+        # Crop
+        new_state = new_state[14:-4,:]
+
+        return new_state
+
     def remove_old_episode(self):
-        if len(self.states) > self.num_hold_episode:
-            self.states = self.states[-self.num_hold_episode:]
-            self.actions = self.actions[-self.num_hold_episode:]
-            self.rewards = self.rewards[-self.num_hold_episode:]
-            self.states_next = self.states_next[-self.num_hold_episode:]
-            self.tarminals = self.tarminals[-self.num_hold_episode:]
-            self.discounted_rewards = self.discounted_rewards[-self.num_hold_episode:]
+        if len(self.states) > self.max_size:
+            self.states = list(self.states[-self.max_size:])
+            self.actions = list(self.actions[-self.max_size:])
+            self.rewards = list(self.rewards[-self.max_size:])
+            self.terminals = list(self.terminals[-self.max_size:])
+            self.discounted_rewards = list(self.discounted_rewards[-self.max_size:])
 
-    def add_episode(self, episode):
-        if not self.global_memory:
-            assert "Wrong operation"
-        self.states += episode.states
-        self.actions += episode.actions
-        self.rewards += episode.rewards
-        self.states_next += episode.states_next
-        self.tarminals += episode.tarminals
-        self.discounted_rewards += episode.discounted_rewards
-
-        self.remove_old_episode()
-
-    def add_one_step(self, state, action, reward, state_next, tarminal):
-        self.states.append(state)
+    def add_one_step(self, state_next, action, reward, terminal):
+        # Adding state is next state of taken action
+        if self.do_preprocess: state_next = self.preprocess_state(state_next)
+        self.states.append(state_next)
         self.actions.append(action)
         self.rewards.append(reward)
-        self.states_next.append(state_next)
-        self.tarminals.append(tarminal)
+        self.terminals.append(terminal)
 
     def calculate_discounted_rewards(self, discount_rate):
         if self.global_memory:
@@ -184,57 +182,49 @@ class EpisodeMemory():
             self.discounted_rewards[i] = self.rewards[i] + self.discounted_rewards[i + 1] * discount_rate
 
     def has_enough_memory(self):
-        return len(self.states) >= self.num_hold_episode
+        return len(self.states) >= self.min_size
     
+    def get_states(self, index):
+        # Pickup state from index-state_seq_length to index
+        if len(self.states) < self.state_seq_length:
+            return_state = [self.states[0] for _ in range(self.state_seq_length)]
+            for i in range(len(self.states)):
+                return_state[self.state_seq_length-len(self.states) + i] = self.states[i]
+        else:
+            return_state = self.states[index-self.state_seq_length:index]
+        
+        return np.array(return_state).transpose([1,2,0])
+    
+    def get_last_states(self):
+        return self.get_states(len(self.states))
+
     def get_batch(self, batch_size):
         states_batch = []
         actions_batch = []
         rewards_batch = []
         states_next_batch = []
-        tarminals_batch = []
+        terminals_batch = []
 
-        index = np.random.randint(0, len(self.states), batch_size)
+        index = np.arange(len(self.states))
+        np.random.shuffle(index)
+        #index = np.random.randint(0, len(self.states), batch_size)
 
         for i in index:
-            states_batch.append(self.states[i])
+            if i - 1 < self.state_seq_length or i > len(self.states): continue
+            
+            if np.random.random() > 0.1:
+                if self.rewards[i] == 0 and self.terminals[i] == False:
+                    continue
+
+            states_batch.append(self.get_states(i - 1))
             actions_batch.append(self.actions[i])
             rewards_batch.append(self.rewards[i])
-            states_next_batch.append(self.states_next[i])
-            tarminals_batch.append(self.tarminals[i])
+            states_next_batch.append(self.get_states(i))
+            terminals_batch.append(self.terminals[i])
 
-        return states_batch, actions_batch, rewards_batch, states_next_batch, tarminals_batch
+            if len(states_batch) == batch_size: break
 
-class StateHoler():
-    def __init__(self, num_states, initial_state, skip_frame, do_preprocess):
-        if skip_frame < 1: assert "Invalid param"
-
-        self.num_states = num_states
-        self.skip_frame = skip_frame
-
-        self.do_preprocess = do_preprocess
-        if self.do_preprocess:
-            initial_state = self.preprocess_state(initial_state)
-        
-        self.states = np.array([initial_state for _ in range(self.num_states * self.skip_frame)])
-    
-    def preprocess_state(self, state):
-        # Resize and convert to gray scale
-        new_state = np.array(Image.fromarray(state).resize((84, 110), Image.ANTIALIAS).convert("L"))
-        # Crop
-        new_state = new_state[14:-4,:]
-
-        return new_state
-
-    def add_state(self, new_state):
-        if self.do_preprocess:
-            new_state = self.preprocess_state(new_state)
-
-        self.states = np.concatenate((self.states, [new_state]))
-        self.states = self.states[-(self.num_states*self.skip_frame):]
-    
-    def get_state(self):
-        # Return shape [height, width, channel]
-        return self.states[self.skip_frame-1::self.skip_frame].transpose([1,2,0])
+        return states_batch, actions_batch, rewards_batch, states_next_batch, terminals_batch
 
 def main():
     num_states_to_hold = 4
@@ -246,18 +236,20 @@ def main():
     target_network_update_frequency = 10000
     batch_size = 32
     discount_rate = 0.99
-    memory_size = 512#20000
-    learning_rate = 0.001
+    memory_size = 500000#1000000#20000
+    learn_start = 50000
+    learning_rate = 0.00025
+    eval_ep_frequency = 25
 
-    should_render = True
+    should_render = False
 
     env = gym.make("Breakout-v0")
     num_actions = env.action_space.n
 
-    # Initialize StateHolder once to check state shape
     state = env.reset()
-    state_holder = StateHoler(num_states_to_hold, state, skip_frame, True)
-    num_states = list(state_holder.get_state().shape)
+
+    episode_memory = EpisodeMemory(True, learn_start, memory_size, True, num_states_to_hold)
+    num_states = list(episode_memory.preprocess_state(state).shape) + [num_states_to_hold]
 
     with tf.Session() as sess:#tf.Session(config=tf.ConfigProto(log_device_placement=True))
         agent = QAgent(sess, num_states, num_actions, epsilon_initial, epsilon_end, discount_rate)
@@ -279,11 +271,9 @@ def main():
         episode_count = sess.run(episode_count_variable)
         global_step = sess.run(global_step_variable)
 
-        episode_memory = EpisodeMemory(True, memory_size)
-
         state = env.reset()
-        state_holder = StateHoler(num_states_to_hold, state, skip_frame, True)
-        
+        episode_memory.add_one_step(state, 1, 0.0, False)
+
         episode_reward = 0
         start_time = time.time()
         terminal = True
@@ -292,44 +282,71 @@ def main():
         while True:
             if should_render: env.render()
 
-            action = agent.predict_action_with_epsilon_greedy(state_holder.get_state(), global_step / epsilon_decay_end_episode)                
+            action = agent.predict_action_with_epsilon_greedy(episode_memory.get_last_states(), global_step / epsilon_decay_end_episode)
             if terminal: action = 1
             
-            state_next, reward, terminal, info_dict = env.step(action)
+            state, reward, terminal, info_dict = env.step(action)
+            episode_memory.add_one_step(state, action, reward, terminal)
 
-            state_initial = state_holder.get_state()
-            state_holder.add_state(state_next)
-            
-            episode_memory.add_one_step(state_initial, action, reward, state_holder.get_state(), terminal)
             episode_reward += reward
 
             if episode_memory.has_enough_memory():
                 if global_step % training_frequency == 0:
+                    should_render = True
                     s, a, r, s_next, t = episode_memory.get_batch(batch_size)
                     loss, summary = agent.train(s, a, r, s_next, t, learning_rate=learning_rate)
-                
+                    
                 if global_step % target_network_update_frequency == 0:
                     print("Update target network")
                     agent.update_target_network()
 
-            global_step += 1
+                global_step += 1
 
             if terminal:
-            
                 current_time = time.time()
-                print("Ep " + str(episode_count) + ", EpReward " + str(episode_reward) + ", Elapse " + format(current_time - start_time, ".2f") + " LastLoss " + format(loss, ".4f") + ", EpsilonProg " + format(global_step / epsilon_decay_end_episode, ".2f"))
+                print("Ep " + str(episode_count) + ", EpReward " + str(episode_reward) + ", Elapse " + format(current_time - start_time, ".2f") + " LastLoss " + format(loss, ".4f") + ", EpsilonProg " + format(global_step / epsilon_decay_end_episode, ".3f"))
                 start_time = current_time
+                
+                if episode_memory.has_enough_memory() and episode_count % eval_ep_frequency == 0:
+                    eval_reward = evaluation(agent, num_states_to_hold, skip_frame, env)
+                    print("EvalReward " + str(eval_reward))
                 
                 state = env.reset()
                 episode_reward = 0
-                episode_count += 1
+                episode_memory.remove_old_episode()
 
-                if episode_memory.has_enough_memory():
+                if episode_memory.has_enough_memory() and loss != 0:
                     sess.run(episode_count_variable.assign(episode_count))
                     sess.run(global_step_variable.assign(global_step))
                     saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"), global_step = episode_count)
                     summary_writer.add_summary(summary, episode_count)
 
+                    episode_count += 1
+
+def evaluation(agent, num_states_to_hold, skip_frame, env):
+    
+    state = env.reset()
+    
+    episode_memory = EpisodeMemory(True, 0, 10000, True, num_states_to_hold)
+    episode_memory.add_one_step(state, 1, 0.0, False)
+
+    eval_reward = 0
+
+    terminal = True
+
+    for i in range(1000):
+        env.render()
+        action = agent.predict_action(episode_memory.get_last_states())
+        if terminal: action = 1
+
+        state, reward, terminal, _ = env.step(action)
+        eval_reward += reward
+
+        if terminal: break
+
+        episode_memory.add_one_step(state, action, reward, terminal)
+    
+    return eval_reward
 
 if __name__ == "__main__":
     main()
