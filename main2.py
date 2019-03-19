@@ -153,6 +153,8 @@ class EpisodeMemory():
         # Crop
         new_state = new_state[14:-4,:]
 
+        #new_state = (new_state / 255).astype(np.float32)
+        new_state = (new_state / 255).astype(np.float16)
         return new_state
 
     def remove_old_episode(self):
@@ -163,10 +165,9 @@ class EpisodeMemory():
             self.terminals = list(self.terminals[-self.max_size:])
             self.discounted_rewards = list(self.discounted_rewards[-self.max_size:])
 
-    def add_one_step(self, state_next, action, reward, terminal):
-        # Adding state is next state of taken action
-        if self.do_preprocess: state_next = self.preprocess_state(state_next)
-        self.states.append(state_next)
+    def add_one_step(self, state, action, reward, terminal):
+        if self.do_preprocess: state = self.preprocess_state(state)
+        self.states.append(state)
         self.actions.append(action)
         self.rewards.append(reward)
         self.terminals.append(terminal)
@@ -185,18 +186,18 @@ class EpisodeMemory():
         return len(self.states) >= self.min_size
     
     def get_states(self, index):
-        # Pickup state from index-state_seq_length to index
-        if len(self.states) < self.state_seq_length:
-            return_state = [self.states[0] for _ in range(self.state_seq_length)]
-            for i in range(len(self.states)):
-                return_state[self.state_seq_length-len(self.states) + i] = self.states[i]
-        else:
-            return_state = self.states[index-self.state_seq_length:index]
-        
-        return np.array(return_state).transpose([1,2,0])
+        return_states = [np.zeros(self.states[0].shape) for _ in range(self.state_seq_length)]
+
+        for i, j in enumerate(list(range(index, index-self.state_seq_length, -1))):
+            if j < 0: break
+            if self.terminals[j] and i != 0: 
+                break
+            return_states[self.state_seq_length-i-1] = self.states[j]
+            
+        return np.array(return_states).transpose([1,2,0])
     
     def get_last_states(self):
-        return self.get_states(len(self.states))
+        return self.get_states(len(self.states) - 1)
 
     def get_batch(self, batch_size):
         states_batch = []
