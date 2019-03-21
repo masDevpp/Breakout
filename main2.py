@@ -211,16 +211,16 @@ class EpisodeMemory():
         #index = np.random.randint(0, len(self.states), batch_size)
 
         for i in index:
-            if i - 1 < self.state_seq_length or i > len(self.states): continue
+            if i - 1 < self.state_seq_length or i + 1 > len(self.states) - 1: continue
             
             if np.random.random() > 0.1:
                 if self.rewards[i] == 0 and self.terminals[i] == False:
                     continue
 
-            states_batch.append(self.get_states(i - 1))
+            states_batch.append(self.get_states(i))
             actions_batch.append(self.actions[i])
             rewards_batch.append(self.rewards[i])
-            states_next_batch.append(self.get_states(i))
+            states_next_batch.append(self.get_states(i + 1))
             terminals_batch.append(self.terminals[i])
 
             if len(states_batch) == batch_size: break
@@ -273,6 +273,7 @@ def main():
         global_step = sess.run(global_step_variable)
 
         state = env.reset()
+        state_prev = state
         episode_memory.add_one_step(state, 1, 0.0, False)
 
         episode_reward = 0
@@ -287,7 +288,9 @@ def main():
             if terminal: action = 1
             
             state, reward, terminal, info_dict = env.step(action)
-            episode_memory.add_one_step(state, action, reward, terminal)
+
+            episode_memory.add_one_step(state_prev, action, reward, terminal)
+            state_prev = state
 
             episode_reward += reward
 
