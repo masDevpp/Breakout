@@ -241,6 +241,7 @@ def main():
     learn_start = 50000
     learning_rate = 0.00025
     eval_ep_frequency = 25
+    eval_max_step = 5000
 
     should_render = False
 
@@ -308,42 +309,55 @@ def main():
 
             if terminal:
                 current_time = time.time()
-                print("Ep " + str(episode_count) + ", EpReward " + str(episode_reward) + ", Elapse " + format(current_time - start_time, ".2f") + " LastLoss " + format(loss, ".4f") + ", EpsilonProg " + format(global_step / epsilon_decay_end_episode, ".3f"))
+                print("Ep " + str(episode_count) + ", EpReward " + str(episode_reward) + ", Elapse " + format(current_time - start_time, ".2f") + " LastLoss " + format(loss, ".4f") + ", EpsilonProg " + format(global_step / epsilon_decay_end_episode, ".4f"))
                 start_time = current_time
                 
-                if episode_memory.has_enough_memory() and episode_count % eval_ep_frequency == 0:
-                    eval_reward = evaluation(agent, num_states_to_hold, skip_frame, env)
-                    print("EvalReward " + str(eval_reward))
+                if episode_memory.has_enough_memory():
+                    if episode_count % eval_ep_frequency == 0:
+                        eval_reward0 = evaluation(agent, num_states_to_hold, skip_frame, env, False, eval_max_step)
+                        eval_reward1 = evaluation(agent, num_states_to_hold, skip_frame, env, True, eval_max_step)
+                        print("EvalReward " + str(eval_reward0) + " " + str(eval_reward1))
+
+                        sess.run(episode_count_variable.assign(episode_count))
+                        sess.run(global_step_variable.assign(global_step))
+                        saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"), global_step = episode_count)
+
+                        with open(os.path.join(LOG_DIR, "log.txt"), "a") as f:
+                            f.write("Ep " + str(episode_count) + ", TrainReward " + str(episode_reward) + ", EvalReward " + str(eval_reward0) + " " + str(eval_reward1) + ", LastLoss " + format(loss, ".5f") + ", GlobalStep " + str(global_step) + "\n")
+                        
+                    if summary is not None:
+                        summary_writer.add_summary(summary, episode_count)
+                    
+                    episode_count += 1
                 
                 state = env.reset()
                 episode_reward = 0
-                episode_memory.remove_old_episode()
+                episode_memory.remove_old_episode()                    
 
-                if episode_memory.has_enough_memory() and loss != 0:
-                    sess.run(episode_count_variable.assign(episode_count))
-                    sess.run(global_step_variable.assign(global_step))
-                    saver.save(sess, os.path.join(LOG_DIR, "model.ckpt"), global_step = episode_count)
-                    summary_writer.add_summary(summary, episode_count)
-
-                    episode_count += 1
-
-def evaluation(agent, num_states_to_hold, skip_frame, env):
+def evaluation(agent, num_states_to_hold, skip_frame, env, fire_support = False, max_step = 1000):
     
     state = env.reset()
     
-    episode_memory = EpisodeMemory(True, 0, 10000, True, num_states_to_hold)
+    episode_memory = EpisodeMemory(True, 0, max_step * 2, True, num_states_to_hold)
     episode_memory.add_one_step(state, 1, 0.0, False)
 
     eval_reward = 0
 
     terminal = True
+    live = 0
+    dropped = False
 
-    for i in range(1000):
+    for i in range(max_step):
         env.render()
         action = agent.predict_action(episode_memory.get_last_states())
-        if terminal: action = 1
+        if terminal or (fire_support and dropped): action = 1
 
-        state, reward, terminal, _ = env.step(action)
+        state, reward, terminal, info_dict = env.step(action)
+        
+        if live > info_dict["ale.lives"]: dropped = True
+        else: dropped = False
+        live = info_dict["ale.lives"]
+
         eval_reward += reward
 
         if terminal: break
