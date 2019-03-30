@@ -29,8 +29,8 @@ class QAgent():
         with tf.variable_scope("prediction_network"):
             self.prediction_input_placeholder = tf.placeholder("float", [None] + self.input_shape)
 
-            conv_0 = slim.conv2d(self.prediction_input_placeholder, 16, 8, 4, scope="conv_0")
-            conv_1 = slim.conv2d(conv_0, 32, 4, 2, scope="conv_1")
+            conv_0 = slim.conv2d(self.prediction_input_placeholder, 16, [8, 8], 4, scope="conv_0")
+            conv_1 = slim.conv2d(conv_0, 32, [4, 4], 2, scope="conv_1")
             flatten = slim.flatten(conv_1)
             fc_0 = slim.fully_connected(flatten, 256, scope="fc_0")
             self.output = slim.fully_connected(fc_0, self.num_actions, activation_fn=None, scope="q_values")
@@ -40,8 +40,8 @@ class QAgent():
         with tf.variable_scope("target_network"):
             self.target_net_input_placeholder = tf.placeholder("float", [None] + self.input_shape)
 
-            conv_0 = slim.conv2d(self.target_net_input_placeholder, 16, 8, 4, scope="conv_0", trainable=False)
-            conv_1 = slim.conv2d(conv_0, 32, 4, 2, scope="conv_1", trainable=False)
+            conv_0 = slim.conv2d(self.target_net_input_placeholder, 16, [8, 8], 4, scope="conv_0", trainable=False)
+            conv_1 = slim.conv2d(conv_0, 32, [4, 4], 2, scope="conv_1", trainable=False)
             flatten = slim.flatten(conv_1)
             fc_0 = slim.fully_connected(flatten, 256, scope="fc_0", trainable=False)
             self.output_target = slim.fully_connected(fc_0, self.num_actions, activation_fn=None, scope="q_values", trainable=False)
@@ -68,7 +68,8 @@ class QAgent():
 
             tf.summary.scalar("loss", self.loss)
 
-            optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_placeholder)
+            #optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_placeholder)
+            optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate_placeholder)
             self.train_op = optimizer.minimize(self.loss)
 
     def predict_action(self, state):
