@@ -3,11 +3,11 @@ import tensorflow as tf
 import gym
 import numpy as np
 from PIL import Image
-from DQNAgent import DQNAgent
+from DDQNAgent import DDQNAgent
 from EpisodeMemory import EpisodeMemory
 import time
 
-LOG_DIR = os.path.join(os.getcwd(), "log")
+LOG_DIR = os.path.join(os.getcwd(), "log_DDQN")
 
 def main():
     num_states_to_hold = 4
@@ -20,12 +20,12 @@ def main():
     batch_size = 32
     discount_rate = 0.99
     memory_size = 550000#1000000
-    learn_start = 200000#50000
-    learning_rate = 0.00010#0.00020#0.00025
+    learn_start = 100000#50000
+    learning_rate = 0.00020#0.00025
     eval_ep_frequency = 25
     eval_max_step = 2000
     ckpt_backup_ep_frequeny = int(200 / eval_ep_frequency) * eval_ep_frequency
-    render_during_train = True
+    render_during_train = False
 
     should_render = False
 
@@ -39,7 +39,7 @@ def main():
     num_states = list(episode_memory.preprocess_state(state).shape) + [num_states_to_hold]
 
     with tf.Session() as sess:#tf.Session(config=tf.ConfigProto(log_device_placement=True))
-        agent = DQNAgent(sess, num_states, num_actions, epsilon_initial, epsilon_end, discount_rate)
+        agent = DDQNAgent(sess, num_states, num_actions, epsilon_initial, epsilon_end, discount_rate)
 
         episode_count_variable = tf.Variable(0, trainable=False, name="episode_count")
         global_step_variable = tf.Variable(0, trainable=False, name="global_step")
@@ -75,7 +75,7 @@ def main():
         while True:
             if should_render: env.render()
 
-            action = agent.predict_action_with_epsilon_greedy(episode_memory.get_last_states(), global_step / epsilon_decay_end_episode)
+            action, _ = agent.predict_action_with_epsilon_greedy(episode_memory.get_last_states(), global_step / epsilon_decay_end_episode)
             
             state, reward, terminal, _ = env.step(action)
             if reward > 1: reward = 1
@@ -91,7 +91,7 @@ def main():
                 if global_step % training_frequency == 0:
                     should_render = render_during_train
                     s, a, r, s_next, t = episode_memory.get_batch(batch_size)
-                    loss, summary = agent.train(s, a, r, s_next, t, learning_rate=learning_rate)
+                    loss, summary = agent.train2(s, a, r, s_next, t, learning_rate=learning_rate)
                     loss_sum += loss
                     num_loss_added += 1
                     
@@ -104,16 +104,16 @@ def main():
             if terminal:
                 if episode_memory.has_enough_memory():
                     elapse_time = time.time() - start_time
-                    print("Ep " + str(episode_count) + ", EpReward " + str(episode_reward) + ", Elapse " + format(elapse_time, ".2f") + "(" + format(elapse_time / local_step, ".3f") + ") Loss " + format(loss_sum / (num_loss_added+0.00001), ".5f") + ", EpsilonProg " + format(global_step / epsilon_decay_end_episode, ".4f"))
+                    print("Ep " + str(episode_count) + ", EpReward " + str(episode_reward) + ", Elapse " + format(elapse_time, ".2f") + "(" + format(elapse_time / local_step, ".5f") + ") Loss " + format(loss_sum / (num_loss_added+0.00001), ".5f") + ", EpsilonProg " + format(global_step / epsilon_decay_end_episode, ".4f"))
                     start_time = time.time()
                 
                     if episode_count % eval_ep_frequency == 0:
-                        eval_reward_0 = evaluation(agent, num_states_to_hold, skip_frame, env, False, eval_max_step)
-                        eval_reward_1 = evaluation(agent, num_states_to_hold, skip_frame, env, False, eval_max_step)
-                        eval_reward_2 = evaluation(agent, num_states_to_hold, skip_frame, env, False, eval_max_step)
-                        eval_reward_f0 = evaluation(agent, num_states_to_hold, skip_frame, env, True, eval_max_step)
+                        eval_reward_0, q0 = evaluation(agent, num_states_to_hold, skip_frame, env, False, eval_max_step)
+                        eval_reward_1, q1 = evaluation(agent, num_states_to_hold, skip_frame, env, False, eval_max_step)
+                        eval_reward_2, q2 = evaluation(agent, num_states_to_hold, skip_frame, env, False, eval_max_step)
+                        eval_reward_f0, qf0 = evaluation(agent, num_states_to_hold, skip_frame, env, True, eval_max_step)
                         env.reset()
-                        print("EvalReward " + str(eval_reward_0) + " " + str(eval_reward_1) + " " + str(eval_reward_2) + ", " + str(eval_reward_f0))
+                        print("EvalReward " + str(eval_reward_0) + " " + str(eval_reward_1) + " " + str(eval_reward_2) + " f" + str(eval_reward_f0) + ", AveQ " + format(q0, ".5f") + " " + format(q1, ".5f") + " " + format(q2, ".5f") + " f" + format(qf0, ".5f"))
 
                         sess.run(episode_count_variable.assign(episode_count))
                         sess.run(global_step_variable.assign(global_step))
@@ -129,7 +129,7 @@ def main():
                             continuous_save_fail_count += 1
 
                         with open(os.path.join(LOG_DIR, "log.txt"), "a") as f:
-                            f.write("Ep " + str(episode_count) + ", TrainReward " + str(episode_reward) + ", EvalReward " + str(eval_reward_0) + " " + str(eval_reward_1) + " " + str(eval_reward_2) + " f" + str(eval_reward_f0) + ", Loss " + format(loss_sum / (num_loss_added+0.00001), ".5f") + ", GlobalStep " + str(global_step) + ", " + time.asctime() + "\n")
+                            f.write("Ep " + str(episode_count) + ", TrainReward " + str(episode_reward) + ", EvalReward " + str(eval_reward_0) + " " + str(eval_reward_1) + " " + str(eval_reward_2) + " f" + str(eval_reward_f0) + ", AveQ " + format(q0, ".5f") + " " + format(q1, ".5f") + " " + format(q2, ".5f") + " " + " f" + format(qf0, ".5f") + ", Loss " + format(loss_sum / (num_loss_added+0.00001), ".5f") + ", GlobalStep " + str(global_step) + ", " + time.asctime() + "\n")
                         
                     if summary is not None:
                         summary_writer.add_summary(summary, episode_count)
@@ -155,10 +155,16 @@ def evaluation(agent, num_states_to_hold, skip_frame, env, fire_support = False,
     live = 0
     dropped = True
 
+    q_sum = 0
+    step = 0    
+
     for i in range(max_step):
         env.render()
-        action = agent.predict_action(episode_memory.get_last_states())
+        action, q = agent.predict_action(episode_memory.get_last_states())
         if fire_support and dropped: action = 1
+        
+        q_sum += np.max(q)
+        step += 1
 
         state, reward, terminal, info_dict = env.step(action)
         
@@ -172,7 +178,7 @@ def evaluation(agent, num_states_to_hold, skip_frame, env, fire_support = False,
 
         episode_memory.add_one_step(state, action, reward, terminal, eval_reward)
     
-    return eval_reward
+    return eval_reward, q_sum / step
 
 if __name__ == "__main__":
     main()

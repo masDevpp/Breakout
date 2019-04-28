@@ -19,9 +19,9 @@ class EpisodeMemory():
     
     def preprocess_state(self, state):
         # Resize and convert to gray scale
-        new_state = np.array(Image.fromarray(state).resize((84, 110), Image.ANTIALIAS).convert("L"))
+        new_state = np.array(Image.fromarray(state).resize((90, 102), Image.ANTIALIAS).convert("L"))
         # Crop
-        new_state = new_state[14:-4,:]
+        new_state = new_state[14:-4,3:-3]
 
         #new_state = (new_state / 255).astype(np.float32)
         new_state = (new_state / 255).astype(np.float16)
@@ -66,6 +66,24 @@ class EpisodeMemory():
         return self.get_states(len(self.states) - 1)
 
     def get_batch(self, batch_size):
+        states_batch = []
+        actions_batch = []
+        rewards_batch = []
+        states_next_batch = []
+        terminals_batch = []
+
+        index = np.random.randint(1, len(self.states) - 1, batch_size)
+
+        for i in index:
+            states_batch.append(self.get_states(i))
+            actions_batch.append(self.actions[i + 1])
+            rewards_batch.append(self.rewards[i + 1])
+            states_next_batch.append(self.get_states(i + 1))
+            terminals_batch.append(self.terminals[i + 1])
+
+        return states_batch, actions_batch, rewards_batch, states_next_batch, terminals_batch
+
+    def get_batch2(self, batch_size):
         states_batch = []
         actions_batch = []
         rewards_batch = []
