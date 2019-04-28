@@ -16,12 +16,13 @@ class DQNAgent():
 
         self.build_prediction_network()
         self.build_target_network()
-        self.build_training_operator()
+        #self.build_training_operator()
+        self.build_training_operator2()
         self.summary = tf.summary.merge_all()
     
     def build_prediction_network(self):
         with tf.variable_scope("prediction_network"):
-            self.prediction_input_placeholder = tf.placeholder("float", [None] + self.input_shape)
+            self.prediction_input_placeholder = tf.placeholder("float", [None] + self.input_shape, name="input")
 
             conv_0 = slim.conv2d(self.prediction_input_placeholder, 16, [8, 8], 4, scope="conv_0")
             conv_1 = slim.conv2d(conv_0, 32, [4, 4], 2, scope="conv_1")
@@ -31,7 +32,7 @@ class DQNAgent():
         
     def build_target_network(self):
         with tf.variable_scope("target_network"):
-            self.target_net_input_placeholder = tf.placeholder("float", [None] + self.input_shape)
+            self.target_net_input_placeholder = tf.placeholder("float", [None] + self.input_shape, name="target_input")
 
             conv_0 = slim.conv2d(self.target_net_input_placeholder, 16, [8, 8], 4, scope="conv_0", trainable=False)
             conv_1 = slim.conv2d(conv_0, 32, [4, 4], 2, scope="conv_1", trainable=False)
@@ -42,9 +43,9 @@ class DQNAgent():
     def build_training_operator(self):
         with tf.variable_scope("training_operator"):
             self.target_q_placeholder = tf.placeholder("float", [None])
-            self.reward_placeholder = tf.placeholder("float", [None])
-            self.action_placeholder = tf.placeholder("int32", [None])
-            self.learning_rate_placeholder = tf.placeholder("float")
+            self.reward_placeholder = tf.placeholder("float", [None], name="reward")
+            self.action_placeholder = tf.placeholder("int32", [None], name="action")
+            self.learning_rate_placeholder = tf.placeholder("float", name="learning_rate")
 
             output_flat = tf.reshape(self.output, [-1])
 
@@ -61,6 +62,39 @@ class DQNAgent():
             tf.summary.scalar("loss", self.loss)
 
             #optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_placeholder)
+            optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate_placeholder)
+            self.train_op = optimizer.minimize(self.loss)
+
+    def build_training_operator2(self):
+        with tf.variable_scope("training_operator"):
+            self.reward_placeholder = tf.placeholder("float", [None], name="reward")
+            self.action_placeholder = tf.placeholder("int32", [None], name="action")
+            self.learning_rate_placeholder = tf.placeholder("float", name="learning_rate")
+            self.terminal_placeholder = tf.placeholder("float", name="terminal")
+
+            # Select Q value
+            output_flat = tf.reshape(self.output, [-1])
+
+            index = tf.range(tf.shape(self.output)[0]) * tf.shape(self.output)[1]
+            index = index + self.action_placeholder
+
+            self.selected_output = tf.gather(output_flat, index)
+
+            # Select target value
+            target_action = tf.reshape(tf.argmax(self.output_target, axis=1, output_type=tf.int32), [-1])
+            target_output_flat = tf.reshape(self.output_target, [-1])
+
+            self.target_index = tf.range(tf.shape(self.output_target)[0]) * tf.shape(self.output_target)[1]
+            self.target_index = self.target_index + target_action
+            
+            self.selected_target_output = tf.gather(target_output_flat, self.target_index)
+            self.selected_target_output = self.selected_target_output * (1 - self.terminal_placeholder)
+            self.selected_target_output_discount = self.reward_placeholder + self.gamma * self.selected_target_output
+
+            self.loss = tf.losses.mean_squared_error(self.selected_target_output_discount, self.selected_output)
+
+            tf.summary.scalar("loss", self.loss)
+
             optimizer = tf.train.RMSPropOptimizer(learning_rate=self.learning_rate_placeholder)
             self.train_op = optimizer.minimize(self.loss)
 
@@ -96,17 +130,17 @@ class DQNAgent():
         else:
             return np.random.randint(self.num_actions)
 
-    def train(self, state, action, reward, state_next, tarminal, learning_rate=0.001):
+    def train(self, state, action, reward, state_next, terminal, learning_rate=0.001):
         # All argument should shape like [batch, ...]
-
+        """
         # Get target Q value
         # Make numpy target Q array to avoid train target network
         target_q = self.sess.run(self.output_target, feed_dict={self.target_net_input_placeholder:state_next})
         target_q = np.max(target_q, axis=1)
 
         # Q is zero if terminal
-        tarminal = np.array(tarminal).astype("int")
-        target_q = target_q * (1 - tarminal)
+        terminal = np.array(terminal).astype("int")
+        target_q = target_q * (1 - terminal)
 
         feed_dict = {
             self.prediction_input_placeholder: state,
@@ -114,6 +148,15 @@ class DQNAgent():
             self.reward_placeholder: reward,
             self.learning_rate_placeholder: learning_rate,
             self.action_placeholder: action
+        }
+        """
+        feed_dict = {
+            self.prediction_input_placeholder: state,
+            self.target_net_input_placeholder: state_next,
+            self.reward_placeholder: reward,
+            self.learning_rate_placeholder: learning_rate,
+            self.action_placeholder: action,
+            self.terminal_placeholder: np.array(terminal).astype("float")
         }
 
         _, loss, summary = self.sess.run([self.train_op, self.loss, self.summary], feed_dict=feed_dict)
