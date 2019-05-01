@@ -35,13 +35,15 @@ class EpisodeMemory():
             self.terminals = list(self.terminals[-self.max_size:])
             self.episode_rewards = list(self.episode_rewards[-self.max_size:])
             
-    def add_one_step(self, state, action, reward, terminal, episode_reward):
+    def add_one_step(self, state, action, reward, terminal, episode_reward=None):
         if self.do_preprocess: state = self.preprocess_state(state)
         self.states.append(state)
         self.actions.append(action)
         self.rewards.append(reward)
         self.terminals.append(terminal)
-        self.episode_rewards.append(episode_reward)
+        
+        if episode_reward != None:
+            self.episode_rewards.append(episode_reward)
 
     def has_enough_memory(self):
         return len(self.states) >= self.min_size
