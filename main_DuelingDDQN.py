@@ -19,11 +19,11 @@ def main():
     target_network_update_frequency = 10000
     batch_size = 32
     discount_rate = 0.99
-    memory_size = 700000#1000000
-    learn_start = 100000#50000
-    learning_rate = 5e-5 # lr wold better to decay to arround 1e-5
+    memory_size = 810000#1000000
+    learn_start = 800000#50000
+    learning_rate = 9e-6#1e-5#5e-5 # lr wold better to decay to arround 1e-5
     eval_ep_frequency = 25
-    eval_max_step = 2000
+    eval_max_step = 3000
     ckpt_backup_ep_frequeny = int(200 / eval_ep_frequency) * eval_ep_frequency
     render_during_train = False
 
@@ -55,13 +55,13 @@ def main():
         else:
             print("Initialize variables")
             sess.run(tf.global_variables_initializer())
-            agent.update_target_network()
+        agent.update_target_network()
 
         episode_count = sess.run(episode_count_variable)
         global_step = sess.run(global_step_variable)
 
         state = env.reset()
-        episode_memory.add_one_step(state, 0, 0.0, False, 0)
+        episode_memory.add_one_step(state, 0, 0.0, False)
 
         episode_reward = 0
         local_step = 0
@@ -78,14 +78,15 @@ def main():
             action, _ = agent.predict_action_with_epsilon_greedy(episode_memory.get_last_states(), global_step / epsilon_decay_end_episode)
             
             state, reward, terminal, _ = env.step(action)
-            if reward > 1: reward = 1
+            if reward > 0: reward = 1.0
+            elif reward < 0: reward = -1.0
 
             if terminal: state = env.reset()
 
             episode_reward += reward
             local_step += 1
 
-            episode_memory.add_one_step(state, action, reward, terminal, episode_reward)
+            episode_memory.add_one_step(state, action, reward, terminal)
 
             if episode_memory.has_enough_memory():
                 if global_step % training_frequency == 0:
@@ -147,7 +148,7 @@ def evaluation(agent, num_states_to_hold, skip_frame, env, fire_support = False,
     state = env.reset()
     
     episode_memory = EpisodeMemory(0, max_step * 2, True, num_states_to_hold, skip_frame)
-    episode_memory.add_one_step(state, 0, 0.0, False, 0)
+    episode_memory.add_one_step(state, 0, 0.0, False)
 
     eval_reward = 0
 
@@ -159,7 +160,11 @@ def evaluation(agent, num_states_to_hold, skip_frame, env, fire_support = False,
     step = 0    
 
     for i in range(max_step):
-        env.render()
+        try:
+            env.render()
+        except:
+            pass
+
         action, q = agent.predict_action(episode_memory.get_last_states())
         if fire_support and dropped: action = 1
         
@@ -176,9 +181,59 @@ def evaluation(agent, num_states_to_hold, skip_frame, env, fire_support = False,
 
         if terminal: break
 
-        episode_memory.add_one_step(state, action, reward, terminal, eval_reward)
+        episode_memory.add_one_step(state, action, reward, terminal)
     
     return eval_reward, q_sum / step
 
+def predict():
+    checkpoint = os.path.join(LOG_DIR, "save", "model.ckpt-29400")
+
+    num_states_to_hold = 4
+    skip_frame = 1
+    discount_rate = 0.99
+    sleep_duration = 0.018
+
+    env = gym.make("Breakout-v0", frameskip=4)
+    num_actions = env.action_space.n
+    
+    state = env.reset()
+
+    episode_memory = EpisodeMemory(0, 10000, True, num_states_to_hold, skip_frame)
+    num_states = list(episode_memory.preprocess_state(state).shape) + [num_states_to_hold]
+    episode_memory.add_one_step(state, 0, 0.0, False)
+
+    sess = tf.Session()
+
+    agent = DuelingDDQNAgent(sess, num_states, num_actions, 1.0, 1.0, discount_rate)
+
+    saver = tf.train.Saver()
+    saver.restore(sess, checkpoint)
+
+    episode_reward = 0
+    local_step = 0
+
+    while True:
+        env.render()
+        time.sleep(sleep_duration)
+
+        action, q = agent.predict_action(episode_memory.get_last_states())
+
+        state, reward, terminal, info_dict = env.step(action)
+
+        episode_reward += reward
+        local_step += 1
+
+        episode_memory.add_one_step(state, action, reward, terminal)
+
+        if terminal:
+            state = env.reset()
+            episode_memory = EpisodeMemory(0, 10000, True, num_states_to_hold, skip_frame)
+            episode_memory.add_one_step(state, 0, 0.0, False)
+            print("Step " + str(local_step) + ", Reward " + str(episode_reward))
+            episode_reward = 0
+            local_step = 0
+    
+
 if __name__ == "__main__":
     main()
+    #predict()
