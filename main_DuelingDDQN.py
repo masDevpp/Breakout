@@ -7,9 +7,26 @@ from DuelingDDQNAgent import DuelingDDQNAgent
 from EpisodeMemory import EpisodeMemory
 import time
 
-LOG_DIR = os.path.join(os.getcwd(), "log_DuelingDDQN_Breakout")
+parameters = {
+    "Breakout":
+    {
+        "name": "Breakout",
+        "env": "Breakout-v0",
+        "frameskip": 4,
+        "resize": (90, 102),
+        "crop": [14, -4, 3, -3] # [high, low, left, right]
+    },
+    "SpaceInvaders":
+    {
+        "name": "SpaceInvaders",
+        "env": "SpaceInvaders-v0",
+        "frameskip": 3,
+        "resize": (94, 124),
+        "crop": [0, -1, 0, -1]
+    }
+}
 
-def main():
+def main(env_param):
     num_states_to_hold = 4
     epsilon_initial = 1.0
     epsilon_end = 0.1
@@ -28,13 +45,12 @@ def main():
 
     should_render = False
 
-    env = gym.make("Breakout-v0", frameskip=4)
+    env = gym.make(env_param["env"], frameskip=env_param["frameskip"])
     num_actions = env.action_space.n
-    # Action 0: NOP, 1: Fire, 2: Right, 3: Left
 
     state = env.reset()
 
-    episode_memory = EpisodeMemory(learn_start, memory_size, True, num_states_to_hold, 0.2, 30)
+    episode_memory = EpisodeMemory(learn_start, memory_size, num_states_to_hold, True, env_param["resize"], env_param["crop"], 0.2, 30)
     num_states = list(episode_memory.preprocess_state(state).shape) + [num_states_to_hold]
 
     with tf.Session() as sess:#tf.Session(config=tf.ConfigProto(log_device_placement=True))
@@ -54,6 +70,7 @@ def main():
         else:
             print("Initialize variables")
             sess.run(tf.global_variables_initializer())
+
         agent.update_target_network()
 
         episode_count = sess.run(episode_count_variable)
@@ -146,7 +163,7 @@ def evaluation(agent, num_states_to_hold, env, fire_support = False, max_step = 
 
     state = env.reset()
     
-    episode_memory = EpisodeMemory(0, max_step * 2, True, num_states_to_hold)
+    episode_memory = EpisodeMemory(0, max_step * 2, num_states_to_hold, True, env_param["resize"], env_param["crop"])
     episode_memory.add_one_step(state, 0, 0.0, False)
 
     eval_reward = 0
@@ -184,19 +201,21 @@ def evaluation(agent, num_states_to_hold, env, fire_support = False, max_step = 
     
     return eval_reward, q_sum / step
 
-def predict():
+def predict(env_param):
     checkpoint = os.path.join(LOG_DIR, "save", "model.ckpt-29400")
+    #checkpoint = os.path.join(LOG_DIR, "model.ckpt-325")
 
     num_states_to_hold = 4
     discount_rate = 0.99
-    sleep_duration = 0.018
+    sleep_duration = 0.016
+    max_step = 2500
 
-    env = gym.make("Breakout-v0", frameskip=4)
+    env = gym.make(env_param["env"], frameskip=env_param["frameskip"])
     num_actions = env.action_space.n
     
     state = env.reset()
 
-    episode_memory = EpisodeMemory(0, 10000, True, num_states_to_hold)
+    episode_memory = EpisodeMemory(0, 10000, num_states_to_hold, True, env_param["resize"], env_param["crop"])
     num_states = list(episode_memory.preprocess_state(state).shape) + [num_states_to_hold]
     episode_memory.add_one_step(state, 0, 0.0, False)
 
@@ -211,27 +230,35 @@ def predict():
     local_step = 0
 
     while True:
-        env.render()
-        time.sleep(sleep_duration)
+        state = env.reset()
+        episode_memory.reset()
+        episode_memory.add_one_step(state, 0, 0.0, False)
+        episode_reward = 0
+        local_step = 0
+        images = [Image.fromarray(state)]
 
-        action, q = agent.predict_action(episode_memory.get_last_states())
+        for i in range(max_step):
+            env.render()
+            time.sleep(sleep_duration)
 
-        state, reward, terminal, info_dict = env.step(action)
+            action, q = agent.predict_action(episode_memory.get_last_states())
 
-        episode_reward += reward
-        local_step += 1
+            state, reward, terminal, info_dict = env.step(action)
+            images.append(Image.fromarray(state))
 
-        episode_memory.add_one_step(state, action, reward, terminal)
+            episode_reward += reward
+            local_step += 1
 
-        if terminal:
-            state = env.reset()
-            episode_memory = EpisodeMemory(0, 10000, True, num_states_to_hold)
-            episode_memory.add_one_step(state, 0, 0.0, False)
-            print("Step " + str(local_step) + ", Reward " + str(episode_reward))
-            episode_reward = 0
-            local_step = 0
+            episode_memory.add_one_step(state, action, reward, terminal)
+
+            if terminal: break
+        
+        print("Step " + str(local_step) + ", Reward " + str(episode_reward) + ", " + str(terminal))
     
 
 if __name__ == "__main__":
-    main()
-    #predict()
+    env_param = parameters["Breakout"]
+    LOG_DIR = os.path.join(os.getcwd(), "log_DuelingDDQN_" + env_param["name"])
+
+    #main(env_param)
+    predict(env_param)

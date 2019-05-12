@@ -2,7 +2,7 @@ import numpy as np
 from PIL import Image
 
 class EpisodeMemory():
-    def __init__(self, min_size, max_size, do_preprocess, state_seq_length, reward_filter_prob=0.0, reward_filter_min=0):
+    def __init__(self, min_size, max_size, state_seq_length, do_preprocess, resize, crop, reward_filter_prob=0.0, reward_filter_min=0):
         self.states = []
         self.actions = []
         self.rewards = []
@@ -12,17 +12,25 @@ class EpisodeMemory():
         self.min_size = min_size
         self.max_size = max_size
         self.do_preprocess = do_preprocess
+        self.resize = resize
+        self.crop = crop
         self.state_seq_length = state_seq_length
         self.reward_filter_prob = reward_filter_prob
         self.reward_filter_min = reward_filter_min
     
+    def reset(self):
+        self.states = []
+        self.actions = []
+        self.rewards = []
+        self.terminals = []
+        self.episode_rewards = []
+
     def preprocess_state(self, state):
         # Resize and convert to gray scale
-        new_state = np.array(Image.fromarray(state).resize((90, 102), Image.ANTIALIAS).convert("L"))
+        new_state = np.array(Image.fromarray(state).resize(self.resize, Image.ANTIALIAS).convert("L"))
         # Crop
-        new_state = new_state[14:-4,3:-3]
+        new_state = new_state[self.crop[0]:self.crop[1], self.crop[2]:self.crop[3]]
 
-        #new_state = (new_state / 255).astype(np.float32)
         new_state = (new_state / 255).astype(np.float16)
         return new_state
 
