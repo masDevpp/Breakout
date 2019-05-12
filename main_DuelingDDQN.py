@@ -11,7 +11,6 @@ LOG_DIR = os.path.join(os.getcwd(), "log_DuelingDDQN_Breakout")
 
 def main():
     num_states_to_hold = 4
-    skip_frame = 1
     epsilon_initial = 1.0
     epsilon_end = 0.1
     epsilon_decay_end_episode = 1000000
@@ -35,7 +34,7 @@ def main():
 
     state = env.reset()
 
-    episode_memory = EpisodeMemory(learn_start, memory_size, True, num_states_to_hold, skip_frame, 0.2, 30)
+    episode_memory = EpisodeMemory(learn_start, memory_size, True, num_states_to_hold, 0.2, 30)
     num_states = list(episode_memory.preprocess_state(state).shape) + [num_states_to_hold]
 
     with tf.Session() as sess:#tf.Session(config=tf.ConfigProto(log_device_placement=True))
@@ -109,10 +108,10 @@ def main():
                     start_time = time.time()
                 
                     if episode_count % eval_ep_frequency == 0:
-                        eval_reward_0, q0 = evaluation(agent, num_states_to_hold, skip_frame, env, False, eval_max_step)
-                        eval_reward_1, q1 = evaluation(agent, num_states_to_hold, skip_frame, env, False, eval_max_step)
-                        eval_reward_2, q2 = evaluation(agent, num_states_to_hold, skip_frame, env, False, eval_max_step)
-                        eval_reward_f0, qf0 = evaluation(agent, num_states_to_hold, skip_frame, env, True, eval_max_step)
+                        eval_reward_0, q0 = evaluation(agent, num_states_to_hold, env, False, eval_max_step)
+                        eval_reward_1, q1 = evaluation(agent, num_states_to_hold, env, False, eval_max_step)
+                        eval_reward_2, q2 = evaluation(agent, num_states_to_hold, env, False, eval_max_step)
+                        eval_reward_f0, qf0 = evaluation(agent, num_states_to_hold, env, True, eval_max_step)
                         env.reset()
                         print("EvalReward " + str(eval_reward_0) + " " + str(eval_reward_1) + " " + str(eval_reward_2) + " f" + str(eval_reward_f0) + ", AveQ " + format(q0, ".5f") + " " + format(q1, ".5f") + " " + format(q2, ".5f") + " f" + format(qf0, ".5f"))
 
@@ -143,11 +142,11 @@ def main():
                 loss_sum = 0
                 num_loss_added = 0
 
-def evaluation(agent, num_states_to_hold, skip_frame, env, fire_support = False, max_step = 1000):
+def evaluation(agent, num_states_to_hold, env, fire_support = False, max_step = 1000):
 
     state = env.reset()
     
-    episode_memory = EpisodeMemory(0, max_step * 2, True, num_states_to_hold, skip_frame)
+    episode_memory = EpisodeMemory(0, max_step * 2, True, num_states_to_hold)
     episode_memory.add_one_step(state, 0, 0.0, False)
 
     eval_reward = 0
@@ -189,7 +188,6 @@ def predict():
     checkpoint = os.path.join(LOG_DIR, "save", "model.ckpt-29400")
 
     num_states_to_hold = 4
-    skip_frame = 1
     discount_rate = 0.99
     sleep_duration = 0.018
 
@@ -198,7 +196,7 @@ def predict():
     
     state = env.reset()
 
-    episode_memory = EpisodeMemory(0, 10000, True, num_states_to_hold, skip_frame)
+    episode_memory = EpisodeMemory(0, 10000, True, num_states_to_hold)
     num_states = list(episode_memory.preprocess_state(state).shape) + [num_states_to_hold]
     episode_memory.add_one_step(state, 0, 0.0, False)
 
@@ -227,7 +225,7 @@ def predict():
 
         if terminal:
             state = env.reset()
-            episode_memory = EpisodeMemory(0, 10000, True, num_states_to_hold, skip_frame)
+            episode_memory = EpisodeMemory(0, 10000, True, num_states_to_hold)
             episode_memory.add_one_step(state, 0, 0.0, False)
             print("Step " + str(local_step) + ", Reward " + str(episode_reward))
             episode_reward = 0

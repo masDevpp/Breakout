@@ -2,7 +2,7 @@ import numpy as np
 from PIL import Image
 
 class EpisodeMemory():
-    def __init__(self, min_size, max_size, do_preprocess, state_seq_length, skip_frame, reward_filter_prob=0.0, reward_filter_min=0):
+    def __init__(self, min_size, max_size, do_preprocess, state_seq_length, reward_filter_prob=0.0, reward_filter_min=0):
         self.states = []
         self.actions = []
         self.rewards = []
@@ -13,7 +13,6 @@ class EpisodeMemory():
         self.max_size = max_size
         self.do_preprocess = do_preprocess
         self.state_seq_length = state_seq_length
-        self.skip_frame = skip_frame
         self.reward_filter_prob = reward_filter_prob
         self.reward_filter_min = reward_filter_min
     
@@ -52,12 +51,11 @@ class EpisodeMemory():
         return_states = [np.zeros(self.states[0].shape) for _ in range(self.state_seq_length)]
 
         target_index = self.state_seq_length - 1
-        for i, j in enumerate(list(range(index, index - (self.state_seq_length * self.skip_frame), -1))):
+        for i, j in enumerate(list(range(index, index - self.state_seq_length, -1))):
             if j < 0: break
             
-            if i % self.skip_frame == 0:
-                return_states[target_index] = self.states[j]
-                target_index -= 1
+            return_states[target_index] = self.states[j]
+            target_index -= 1
 
             if self.terminals[j]:# and i != 0: 
                 break
