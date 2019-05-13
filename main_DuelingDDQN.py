@@ -13,16 +13,16 @@ parameters = {
         "name": "Breakout",
         "env": "Breakout-v0",
         "frameskip": 4,
-        "resize": (90, 102),
-        "crop": [14, -4, 3, -3] # [high, low, left, right]
+        "crop": [29, -8, 5, -5], # [high, low, left, right]
+        "resize": (84, 84)
     },
     "SpaceInvaders":
     {
         "name": "SpaceInvaders",
         "env": "SpaceInvaders-v0",
         "frameskip": 3,
-        "resize": (94, 124),
-        "crop": [0, -1, 0, -1]
+        "crop": [0, -1, 0, -1],
+        "resize": (94, 124)
     }
 }
 
@@ -50,7 +50,7 @@ def main(env_param):
 
     state = env.reset()
 
-    episode_memory = EpisodeMemory(learn_start, memory_size, num_states_to_hold, True, env_param["resize"], env_param["crop"], 0.2, 30)
+    episode_memory = EpisodeMemory(learn_start, memory_size, num_states_to_hold, True, env_param["crop"], env_param["resize"], 0.2, 30)
     num_states = list(episode_memory.preprocess_state(state).shape) + [num_states_to_hold]
 
     with tf.Session() as sess:#tf.Session(config=tf.ConfigProto(log_device_placement=True))
@@ -163,7 +163,7 @@ def evaluation(agent, num_states_to_hold, env, fire_support = False, max_step = 
 
     state = env.reset()
     
-    episode_memory = EpisodeMemory(0, max_step * 2, num_states_to_hold, True, env_param["resize"], env_param["crop"])
+    episode_memory = EpisodeMemory(0, max_step * 2, num_states_to_hold, True, env_param["crop"], env_param["resize"])
     episode_memory.add_one_step(state, 0, 0.0, False)
 
     eval_reward = 0
@@ -215,7 +215,7 @@ def predict(env_param):
     
     state = env.reset()
 
-    episode_memory = EpisodeMemory(0, 10000, num_states_to_hold, True, env_param["resize"], env_param["crop"])
+    episode_memory = EpisodeMemory(0, 10000, num_states_to_hold, True, env_param["crop"], env_param["resize"])
     num_states = list(episode_memory.preprocess_state(state).shape) + [num_states_to_hold]
     episode_memory.add_one_step(state, 0, 0.0, False)
 
